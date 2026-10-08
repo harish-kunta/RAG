@@ -1,7 +1,9 @@
 .venv/
+.venv*/
 __pycache__/
 .env
 .env.*
 .rag_index.json
+.langchain_chroma/
 data/sample_support.sqlite3
 data/notion_cache.json

@@ -1,6 +1,6 @@
 # Learn RAG by building it
 
-This project builds a small retrieval system one concept at a time: files, chunking, lexical and semantic search, answer generation, then database and external-note connectors.
+This project builds a small retrieval system one concept at a time: files, chunking, lexical and semantic search, answer generation, then database and external-note connectors. The CLI lessons implement the core steps directly so they are easy to inspect. The browser chat now uses LangChain integrations for chunking, embeddings, vector retrieval, and answer generation.
 
 ## Lesson 1: retrieve useful text
 
@@ -8,16 +8,16 @@ The pipeline reads text and Markdown files from `data/`, splits them into chunks
 
 ## Set up the OpenAI API
 
-In a terminal opened at this project folder, install the small Python SDK dependency and export your key into the current shell session:
+In a terminal opened at this project folder, create a Python 3.10+ environment, install the project dependencies, and export your key into the current shell session:
 
 ```sh
-python3 -m venv .venv
-source .venv/bin/activate
+python3.10 -m venv .venv310
+source .venv310/bin/activate
 pip install -r requirements.txt
 export OPENAI_API_KEY="your-key-here"
 ```
 
-Keep the key in your terminal environment; do not paste it into this repository or into chat. The script reads `OPENAI_API_KEY` automatically.
+The LangChain packages used by the web app require Python 3.10 or later. If `python3.10` is not installed, install Python 3.10+ before creating this environment. Keep the key in your terminal environment; do not paste it into this repository or into chat. The scripts read `OPENAI_API_KEY` automatically.
 
 ## Lesson 2: semantic search with embeddings
 
@@ -80,21 +80,31 @@ python3 rag.py "What does the sample warranty cover?" --lexical --context-only
 
 The current OpenAI pricing page lists GPT-6 Luna at $0.10 per million input tokens and $0.50 per million output tokens for standard processing. Actual cost depends on tokens used, and pricing can change. See the [official OpenAI pricing page](https://developers.openai.com/api/docs/pricing).
 
-## Lesson 10: chat through a web UI
+## Lesson 10: use LangChain in the web chat
 
-The same retrieval pipeline is now available through a small browser chat. It displays the source passages returned by retrieval and carries a short conversation history so follow-up questions can use the preceding exchange.
+The source adapters still read files, SQLite, and Notion, then convert each source to a LangChain `Document`. The web path is:
 
-Install the dependencies, set `OPENAI_API_KEY` in the server terminal, create the sample database if needed, and build the vector index:
+```text
+source adapters → LangChain Documents → RecursiveCharacterTextSplitter
+  → OpenAIEmbeddings → persistent Chroma → LangChain retriever
+  → keyword search + RRF → ChatPromptTemplate → ChatOpenAI → StrOutputParser
+```
+
+It uses LangChain's `RecursiveCharacterTextSplitter`, `OpenAIEmbeddings`, Chroma vector store/retriever, and prompt → chat model → output parser chain. It keeps the project's lexical search and Reciprocal Rank Fusion (RRF), so the web app combines keyword results with the LangChain semantic results. The earlier `rag.py` CLI and its `--eval` report stay as the from-scratch baseline; that evaluation currently does not score the LangChain/Chroma path.
+
+Read the matching [text splitter](https://docs.langchain.com/oss/python/integrations/splitters/recursive_text_splitter), [OpenAI embeddings](https://docs.langchain.com/oss/python/integrations/embeddings/openai), [Chroma](https://docs.langchain.com/oss/python/integrations/vectorstores/chroma), and [ChatOpenAI](https://docs.langchain.com/oss/python/integrations/chat/openai) guides alongside `langchain_rag.py`.
+
+Create/activate the Python 3.10+ environment from the setup section, set `OPENAI_API_KEY` in the server terminal, create the sample database if needed, and build the LangChain index:
 
 ```sh
-pip install -r requirements.txt
-export OPENAI_API_KEY="your-key-here"
 python3 rag.py --init-db
-python3 rag.py --index
+python3 langchain_rag.py --index
 uvicorn chat_app:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. The key stays in the server environment; the browser never receives it. Chat history is currently held in browser memory and disappears when the page is refreshed. This is a local learning app, not safe to expose publicly: it has no login, per-user access controls, saved conversations, or production storage. See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the gaps and a staged plan.
+Open <http://127.0.0.1:8000>. The first indexing run embeds the chunks and saves a persistent local Chroma database under `.langchain_chroma/`; query embeddings and answer generation use the OpenAI API. The index path is tied to a fingerprint of source contents and chunk settings. After sources change, run `python3 langchain_rag.py --index` again; use `--rebuild` to re-embed an unchanged source version.
+
+The key stays in the server environment; the browser never receives it. Chat history is held in browser memory and disappears on refresh. This is a local learning app, not safe to expose publicly: it has no login, per-user access controls, saved conversations, or production database. Chroma here is a local persistent store, not the eventual multi-user production deployment. See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the gaps and staged plan.
 
 ## Lesson 4: add Notion notes
 
@@ -113,7 +123,10 @@ The Notion connector pulls page text into the same `Document` shape as files and
    ```sh
    python3 rag.py --sync-notion
    python3 rag.py --index
+   python3 langchain_rag.py --index
    ```
+
+The first index command refreshes the from-scratch CLI lesson index. The second refreshes the LangChain/Chroma index used by the web chat.
 
 Now ask a question as usual. To inspect what retrieval found without calling the answer model:
 
@@ -187,14 +200,14 @@ python3 rag.py --eval --eval-method lexical --chunk-overlap 80 --top-k 3
 
 Compare its Recall@3 and MRR@3 with the zero-overlap baseline from Lesson 6. A higher score on these sample questions suggests the overlap helped this dataset; it does not guarantee improvement for every knowledge base. Overlap also repeats text, which can increase index size and embed cost.
 
-For semantic or hybrid search, rebuild the vector index with the same overlap setting, then pass that setting when searching or evaluating:
+For semantic or hybrid search in the from-scratch CLI, rebuild its vector index with the same overlap setting, then pass that setting when searching or evaluating:
 
 ```sh
 python3 rag.py --index --chunk-overlap 80
 python3 rag.py --eval --chunk-overlap 80 --top-k 3
 ```
 
-The index records its chunking setting. If you search with a different overlap, the program asks you to rebuild so each question is compared against vectors for the same chunks. Overlap is measured in characters here; production systems usually tune chunk size and overlap against their own data and evaluation questions.
+The CLI index records its chunking setting. If you search with a different overlap, the program asks you to rebuild so each question is compared against vectors for the same chunks. The LangChain web app has its own 500-character/80-character-overlap setting and Chroma index. Overlap is measured in characters here; production systems usually tune chunk size and overlap against their own data and evaluation questions.
 
 ## Lesson 9: pack context for the answer model
 

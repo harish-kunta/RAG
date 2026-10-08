@@ -70,7 +70,7 @@ async function checkHealth() {
     const response = await fetch('/api/health');
     const health = await response.json();
     if (!health.vector_index_present) {
-      statusText.textContent = 'Index needed — run python3 rag.py --index';
+      statusText.textContent = 'Index needed — run python3 langchain_rag.py --index';
       statusBox.classList.add('error');
       return;
     }

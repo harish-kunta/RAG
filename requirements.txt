@@ -1,3 +1,7 @@
 openai
 fastapi
 uvicorn[standard]
+langchain>=1,<2
+langchain-openai>=1,<2
+langchain-text-splitters>=1,<2
+langchain-chroma>=1,<2

@@ -2,11 +2,11 @@
 
 ## What the project has today
 
-The existing pipeline reads Markdown/text files, SQLite rows, and a local cache of Notion pages. It chunks the text, creates embeddings, saves a small JSON vector index, supports lexical/semantic/hybrid retrieval, packs passages into a bounded context, and asks an OpenAI model to answer with source citations. The web milestone adds a browser chat and an HTTP endpoint around that pipeline.
+The existing pipeline reads Markdown/text files, SQLite rows, and a local cache of Notion pages. The `rag.py` lessons implement chunking, embeddings, a small JSON vector index, lexical/semantic/hybrid retrieval, context packing, and answer generation directly. The web app now uses LangChain's text splitter, OpenAI integrations, persistent local Chroma vector store/retriever, and prompt/model/output-parser chain. It retains the project's lexical search and RRF fusion for hybrid retrieval.
 
 ## What is still missing for production
 
-This app is a local, single-user learning tool. The browser holds the current chat in memory and sends a short history with each request. There is no account system, saved conversation database, team separation, or authorization boundary. The JSON vector index is convenient for learning, but it is not a concurrent, scalable vector store. SQLite and Notion are ingested by the existing local connector/cache steps; they are not continuously synchronized. Requests are synchronous and there is no queue, streaming response, quota, abuse protection, alerting, backup, or deployment setup.
+This app is a local, single-user learning tool. The browser holds the current chat in memory and sends a short history with each request. There is no account system, saved conversation database, team separation, or authorization boundary. The JSON index is convenient for the from-scratch lessons; local Chroma is used by the web app, but still is not the shared, managed store needed for multi-user production. SQLite and Notion are ingested by the existing local connector/cache steps; they are not continuously synchronized. Requests are synchronous and there is no queue, streaming response, quota, abuse protection, alerting, backup, or deployment setup.
 
 Do not expose this version directly to the public internet. Metadata filters and citations improve relevance and explainability; they are not access control. If sources contain private data, production retrieval must enforce the caller's permissions before any passages reach the model or browser.
 
