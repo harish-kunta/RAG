@@ -80,6 +80,22 @@ python3 rag.py "What does the sample warranty cover?" --lexical --context-only
 
 The current OpenAI pricing page lists GPT-6 Luna at $0.10 per million input tokens and $0.50 per million output tokens for standard processing. Actual cost depends on tokens used, and pricing can change. See the [official OpenAI pricing page](https://developers.openai.com/api/docs/pricing).
 
+## Lesson 10: chat through a web UI
+
+The same retrieval pipeline is now available through a small browser chat. It displays the source passages returned by retrieval and carries a short conversation history so follow-up questions can use the preceding exchange.
+
+Install the dependencies, set `OPENAI_API_KEY` in the server terminal, create the sample database if needed, and build the vector index:
+
+```sh
+pip install -r requirements.txt
+export OPENAI_API_KEY="your-key-here"
+python3 rag.py --init-db
+python3 rag.py --index
+uvicorn chat_app:app --reload
+```
+
+Open <http://127.0.0.1:8000>. The key stays in the server environment; the browser never receives it. Chat history is currently held in browser memory and disappears when the page is refreshed. This is a local learning app, not safe to expose publicly: it has no login, per-user access controls, saved conversations, or production storage. See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the gaps and a staged plan.
+
 ## Lesson 4: add Notion notes
 
 The Notion connector pulls page text into the same `Document` shape as files and SQLite rows. It uses Notion's API, so only content the integration can access is included.

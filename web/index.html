@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f5f7" />
+    <title>RAG Chat</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="RAG Chat home">
+          <span class="brand-mark" aria-hidden="true">R</span>
+          <span>RAG Chat <small>learning workspace</small></span>
+        </a>
+        <div class="status"><span class="status-dot"></span><span id="status-text">Checking knowledge base…</span></div>
+      </header>
+
+      <section class="chat-shell" aria-label="Chat with your knowledge base">
+        <div class="chat-heading">
+          <div>
+            <p class="eyebrow">YOUR KNOWLEDGE BASE</p>
+            <h1>Ask your notes</h1>
+            <p class="subheading">Answers are grounded in retrieved passages from your files, SQLite data, and synced Notion notes.</p>
+          </div>
+          <button id="new-chat" class="quiet-button" type="button">New chat</button>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite">
+          <div class="welcome" id="welcome">
+            <div class="welcome-icon" aria-hidden="true">✳</div>
+            <h2>What would you like to know?</h2>
+            <p>Ask a question about the information you have indexed.</p>
+            <button class="suggestion" type="button">What does the sample warranty cover?</button>
+            <button class="suggestion" type="button">How long does domestic shipping take?</button>
+          </div>
+        </div>
+
+        <form id="chat-form" class="composer">
+          <label class="sr-only" for="question">Message</label>
+          <textarea id="question" name="question" rows="1" maxlength="2000" placeholder="Ask a question…" required></textarea>
+          <button id="send" class="send-button" type="submit" aria-label="Send message">
+            <span aria-hidden="true">↑</span>
+          </button>
+          <p class="composer-hint">RAG can make mistakes. Check the source passages.</p>
+        </form>
+      </section>
+
+      <footer>Local learning app · Your API key stays on the server</footer>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
