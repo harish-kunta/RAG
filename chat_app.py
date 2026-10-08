@@ -42,7 +42,7 @@ def home() -> FileResponse:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str | bool]:
+def health() -> dict[str, object]:
     """Liveness check; it does not make a paid model request."""
 
     return {"status": "ok", "vector_index_present": rag.INDEX_PATH.exists()}
