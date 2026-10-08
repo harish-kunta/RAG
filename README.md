@@ -80,10 +80,37 @@ python3 rag.py "What does the sample warranty cover?" --lexical --context-only
 
 The current OpenAI pricing page lists GPT-6 Luna at $0.10 per million input tokens and $0.50 per million output tokens for standard processing. Actual cost depends on tokens used, and pricing can change. See the [official OpenAI pricing page](https://developers.openai.com/api/docs/pricing).
 
+## Lesson 4: add Notion notes
+
+The Notion connector pulls page text into the same `Document` shape as files and SQLite rows. It uses Notion's API, so only content the integration can access is included.
+
+1. Create an internal integration in Notion and grant it read access to content.
+2. Copy its secret into your local terminal environment. Do not commit it or paste it into chat:
+
+   ```sh
+   export NOTION_API_KEY="your-integration-secret"
+   ```
+
+3. In Notion, share each page (or parent page) you want indexed with that integration.
+4. Sync those pages and rebuild the vector index:
+
+   ```sh
+   python3 rag.py --sync-notion
+   python3 rag.py --index
+   ```
+
+Now ask a question as usual. To inspect what retrieval found without calling the answer model:
+
+```sh
+python3 rag.py "What did we decide about onboarding?" --context-only
+```
+
+The sync saves readable page text and metadata in `data/notion_cache.json`; Git ignores this local cache. Sync again after Notion content changes, then rebuild the index. The starter connector extracts text blocks and nested blocks. It does not download files or interpret image contents, and it does not sync Notion databases as structured rows yet. The [Notion Search API](https://developers.notion.com/reference/post-search) finds pages available to the integration, and [block children](https://developers.notion.com/reference/get-block-children) provides page content. Both endpoints paginate, which the connector follows.
+
 ## The data path
 
 ```text
-Files → Documents → Chunks → Embeddings → Vector index
+Files + SQLite rows + Notion pages → Documents → Chunks → Embeddings → Vector index
 Question → Embedding → Similarity search → Retrieved context → Answer model
 ```
 
@@ -98,4 +125,4 @@ Question → Embedding → Similarity search → Retrieved context → Answer mo
 
 Run both the lexical and semantic commands for the same paraphrased question. Compare the retrieved source chunks before looking at the generated answer. This helps distinguish a retrieval issue from an answer-generation issue.
 
-The sample notes remain a text file source. A real external notes service can use its own connector to fetch records and convert them to the same `Document` shape before indexing.
+The sample notes remain a text file source. The Notion connector demonstrates how an external service can fetch records and convert them to the same `Document` shape before indexing.

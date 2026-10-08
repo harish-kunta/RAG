@@ -4,3 +4,4 @@ __pycache__/
 .env.*
 .rag_index.json
 data/sample_support.sqlite3
+data/notion_cache.json

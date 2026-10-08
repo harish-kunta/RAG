@@ -12,6 +12,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from notion_source import sync_notion_notes
+
 
 DATA_DIR = Path(__file__).parent / "data"
 SUPPORTED_SUFFIXES = {".md", ".txt"}
@@ -20,6 +22,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 INDEX_PATH = Path(__file__).parent / ".rag_index.json"
 DATABASE_NAME = "sample_support.sqlite3"
 DATABASE_SEED = "database_seed.sql"
+NOTION_CACHE_NAME = "notion_cache.json"
 # These words occur in many questions and passages, so they rarely help choose a source.
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does", "for",
@@ -71,6 +74,16 @@ def load_documents(data_dir: Path) -> list[Document]:
     database_path = data_dir / DATABASE_NAME
     if database_path.exists():
         documents.extend(load_database_documents(database_path))
+    notion_cache_path = data_dir / NOTION_CACHE_NAME
+    if notion_cache_path.exists():
+        for note in json.loads(notion_cache_path.read_text(encoding="utf-8")):
+            documents.append(
+                Document(
+                    source=note["source"],
+                    text=note["text"],
+                    metadata=note.get("metadata", {}),
+                )
+            )
     return documents
 
 
@@ -329,7 +342,7 @@ def generate_answer(question: str, results: list[tuple[float, Chunk]]) -> str:
 
     passages = []
     for _, chunk in results:
-        source_id = f"{chunk.source}, chunk {chunk.number}"
+        source_id = f"{source_label(chunk)}, chunk {chunk.number}"
         passages.append(f"[Source: {source_id}]\n{chunk.text}")
 
     client = openai_client()
@@ -347,10 +360,22 @@ def generate_answer(question: str, results: list[tuple[float, Chunk]]) -> str:
     return response.output_text.strip()
 
 
+def source_label(chunk: Chunk) -> str:
+    """Use a human-readable title for external notes while preserving local IDs."""
+
+    if chunk.metadata.get("kind") == "notion":
+        title = chunk.metadata.get("page_title", "Untitled Notion page")
+        page_id = chunk.metadata.get("notion_id", "")
+        short_id = page_id.replace("-", "")[:8]
+        suffix = f" ({short_id})" if short_id else ""
+        return f"Notion: {title}{suffix}"
+    return chunk.source
+
+
 def print_results(label: str, results: list[tuple[float, Chunk]], show_text: bool) -> None:
     print(f"{label}:")
     for rank, (score, chunk) in enumerate(results, start=1):
-        print(f"[{rank}] {chunk.source} — chunk {chunk.number} (score: {score:.3f})")
+        print(f"[{rank}] {source_label(chunk)} — chunk {chunk.number} (score: {score:.3f})")
         if show_text:
             print(chunk.text)
 
@@ -360,6 +385,7 @@ def main() -> None:
     parser.add_argument("question", nargs="?", help="A question or search phrase")
     parser.add_argument("--index", action="store_true", help="Embed the current source files and save an index")
     parser.add_argument("--init-db", action="store_true", help="Create the sample SQLite database")
+    parser.add_argument("--sync-notion", action="store_true", help="Fetch pages shared with the Notion integration")
     retrieval = parser.add_mutually_exclusive_group()
     retrieval.add_argument("--lexical", action="store_true", help="Use local word overlap instead of embeddings")
     retrieval.add_argument("--compare", action="store_true", help="Show both lexical and semantic search results")
@@ -371,11 +397,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.index or args.init_db:
+    if args.index or args.init_db or args.sync_notion:
         if args.question or args.lexical or args.compare:
-            parser.error("--index and --init-db are standalone commands; omit the question and retrieval flags.")
-        if args.index and args.init_db:
-            parser.error("Choose one standalone action: --index or --init-db.")
+            parser.error("--index, --init-db, and --sync-notion are standalone commands; omit the question and retrieval flags.")
+        if sum((args.index, args.init_db, args.sync_notion)) > 1:
+            parser.error("Choose one standalone action: --index, --init-db, or --sync-notion.")
+        if args.sync_notion:
+            try:
+                count = sync_notion_notes(DATA_DIR / NOTION_CACHE_NAME)
+            except RuntimeError as exc:
+                parser.error(str(exc))
+            print(f"Synced {count} Notion pages to data/{NOTION_CACHE_NAME}.")
+            return
         if args.init_db:
             database_path = initialize_demo_database(DATA_DIR)
             print(f"Initialized the sample SQLite database at {database_path.relative_to(Path(__file__).parent)}.")
