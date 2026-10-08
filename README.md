@@ -180,11 +180,23 @@ python3 rag.py --eval --chunk-overlap 80 --top-k 3
 
 The index records its chunking setting. If you search with a different overlap, the program asks you to rebuild so each question is compared against vectors for the same chunks. Overlap is measured in characters here; production systems usually tune chunk size and overlap against their own data and evaluation questions.
 
+## Lesson 9: pack context for the answer model
+
+Retrieval can return more useful passages than we want to send to the answer model. Context packing walks passages in retrieval order, skips exact duplicates, and includes the highest-ranked passages that fit a character budget. Each included passage keeps its source label for citations.
+
+Ask for more chunks than the answer should receive, then cap the context sent to the model:
+
+```sh
+python3 rag.py "What do I need to know about a warranty claim?" --top-k 8 --context-chars 1600
+```
+
+The response reports how many passages and characters it included. This project uses characters as a simple teaching limit; model context windows are measured in tokens, and different text can use different numbers of tokens per character. A real application should budget with the tokenizer for its model. If the budget is too small to fit any passage, the program asks you to increase it.
+
 ## The data path
 
 ```text
 Files + SQLite rows + Notion pages → Documents + metadata → Chunks → Embeddings → Vector index
-Question → Metadata filters → Keyword search + embedding search → Rank fusion → Retrieved context → Answer model
+Question → Metadata filters → Keyword search + embedding search → Rank fusion → Context packing → Answer model
 ```
 
 - A **document** is a source item with text and metadata, such as its filename.
@@ -195,6 +207,7 @@ Question → Metadata filters → Keyword search + embedding search → Rank fus
 - The hybrid retriever combines keyword and semantic result ranks with RRF. It helps when a question has exact terms and also uses wording different from the source.
 - The evaluation set records which source documents should answer sample questions. Recall@k and MRR@k help compare retrieval methods before assessing answer quality.
 - Chunk overlap repeats a little preceding text at each boundary so relevant context is less likely to be split away from the passage that needs it.
+- Context packing limits how much retrieved text reaches the answer model while keeping source labels attached for citations.
 - The answer model receives only the retrieved passages. It is instructed to cite them and say when they do not contain an answer.
 - A changed source file makes the saved index stale; the program checks this and asks you to rebuild it.
 

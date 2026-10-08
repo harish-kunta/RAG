@@ -549,13 +549,43 @@ def evaluate_retrievers(
         )
 
 
-def generate_answer(question: str, results: list[tuple[float, Chunk]]) -> str:
-    """Ask the model to answer from retrieved chunks and cite their source IDs."""
+def pack_context(
+    results: list[tuple[float, Chunk]],
+    max_chars: int = 4000,
+) -> tuple[str, int, int]:
+    """Greedily fit ranked, unique passages into the answer context budget."""
 
+    if max_chars <= 0:
+        raise RuntimeError("The context budget must be greater than zero characters.")
     passages = []
+    seen_passages = set()
+    used_chars = 0
     for _, chunk in results:
+        normalized_text = " ".join(chunk.text.casefold().split())
+        identity = (chunk.source, normalized_text)
+        if identity in seen_passages:
+            continue
+
         source_id = f"{source_label(chunk)}, chunk {chunk.number}"
-        passages.append(f"[Source: {source_id}]\n{chunk.text}")
+        passage = f"[Source: {source_id}]\n{chunk.text}"
+        separator_chars = 2 if passages else 0
+        passage_cost = separator_chars + len(passage)
+        if used_chars + passage_cost > max_chars:
+            continue
+
+        seen_passages.add(identity)
+        passages.append(passage)
+        used_chars += passage_cost
+
+    if not passages:
+        raise RuntimeError(
+            "No retrieved passage fits the context budget. Increase it with --context-chars."
+        )
+    return "\n\n".join(passages), len(passages), used_chars
+
+
+def generate_answer(question: str, context: str) -> str:
+    """Ask the model to answer from packed context and cite its source labels."""
 
     client = openai_client()
     response = client.responses.create(
@@ -566,7 +596,7 @@ def generate_answer(question: str, results: list[tuple[float, Chunk]]) -> str:
             "you could not find it. Cite factual claims with the source label, for example "
             "[product_faq.md, chunk 1]. Be concise."
         ),
-        input=f"Question: {question}\n\nRetrieved source passages:\n\n" + "\n\n".join(passages),
+        input=f"Question: {question}\n\nRetrieved source passages:\n\n{context}",
         max_output_tokens=300,
     )
     return response.output_text.strip()
@@ -617,6 +647,12 @@ def main() -> None:
     retrieval.add_argument("--hybrid", action="store_true", help="Combine lexical and semantic rankings")
     parser.add_argument("--top-k", type=int, default=3, help="Number of matches to show or source documents to score")
     parser.add_argument(
+        "--context-chars",
+        type=int,
+        default=4000,
+        help="Maximum characters of ranked passages sent to the answer model",
+    )
+    parser.add_argument(
         "--chunk-overlap",
         type=int,
         default=0,
@@ -631,6 +667,8 @@ def main() -> None:
 
     if args.chunk_overlap < 0 or args.chunk_overlap > 250:
         parser.error("--chunk-overlap must be between 0 and 250 for the current 500-character chunks.")
+    if args.context_chars <= 0:
+        parser.error("--context-chars must be greater than zero.")
     if args.eval_method != "all" and not args.eval:
         parser.error("--eval-method can only be used with --eval.")
 
@@ -750,9 +788,13 @@ def main() -> None:
     if args.context_only:
         return
 
-    print(f"\nAnswer (model: {OPENAI_MODEL}):\n")
     try:
-        print(generate_answer(args.question, results))
+        context, passage_count, used_chars = pack_context(results, max_chars=args.context_chars)
+        print(
+            f"\nAnswer (model: {OPENAI_MODEL}; context: {passage_count} passages, "
+            f"{used_chars}/{args.context_chars} characters):\n"
+        )
+        print(generate_answer(args.question, context))
     except RuntimeError as exc:
         parser.error(str(exc))
 
