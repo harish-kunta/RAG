@@ -2,11 +2,11 @@
 
 ## What the project has today
 
-The existing pipeline reads Markdown/text files, SQLite rows, and a local cache of Notion pages. The `rag.py` lessons implement chunking, embeddings, a small JSON vector index, lexical/semantic/hybrid retrieval, context packing, and answer generation directly. The web app now uses LangChain's text splitter, OpenAI integrations, persistent local Chroma vector store/retriever, and prompt/model/output-parser chain. It retains the project's lexical search and RRF fusion for hybrid retrieval.
+The existing pipeline reads Markdown/text files, SQLite rows, and a local cache of Notion pages. The `rag.py` lessons implement chunking, embeddings, a small JSON vector index, lexical/semantic/hybrid retrieval, context packing, and answer generation directly. The web app now uses LangChain's text splitter, OpenAI integrations, persistent local Chroma vector store/retriever, and prompt/model/output-parser chain. It retains the project's lexical search and RRF fusion for hybrid retrieval. Conversations and their source cards persist in a local SQLite database, but have no user ownership or access controls.
 
 ## What is still missing for production
 
-This app is a local, single-user learning tool. The browser holds the current chat in memory and sends a short history with each request. There is no account system, saved conversation database, team separation, or authorization boundary. The JSON index is convenient for the from-scratch lessons; local Chroma is used by the web app, but still is not the shared, managed store needed for multi-user production. SQLite and Notion are ingested by the existing local connector/cache steps; they are not continuously synchronized. Requests are synchronous and there is no queue, streaming response, quota, abuse protection, alerting, backup, or deployment setup.
+This app is a local, single-user learning tool. Conversations persist locally, but there is no account system, user ownership, team separation, or authorization boundary. Anyone who can reach this instance can read its saved chats. The JSON index is convenient for the from-scratch lessons; local Chroma is used by the web app, but still is not the shared, managed store needed for multi-user production. SQLite and Notion are ingested by the existing local connector/cache steps; they are not continuously synchronized. Requests are synchronous and there is no queue, streaming response, quota, abuse protection, alerting, backup, or deployment setup.
 
 Do not expose this version directly to the public internet. Metadata filters and citations improve relevance and explainability; they are not access control. If sources contain private data, production retrieval must enforce the caller's permissions before any passages reach the model or browser.
 
@@ -17,7 +17,7 @@ Do not expose this version directly to the public internet. Metadata filters and
 - Serve a browser UI and API from one origin.
 - Reuse the existing retrieval functions and return the actual passages used as sources.
 - Keep the model key on the server in an environment variable or secret manager.
-- Keep chat history in the browser for now; no user accounts or durable chat storage.
+- Save local chat turns and source cards in SQLite; no user accounts or per-user authorization yet.
 
 ### 2. Durable application data
 
@@ -73,6 +73,6 @@ Browser UI → authenticated API → conversation store (PostgreSQL)
 Private object storage holds originals; logs/metrics record latency, failures, and cost.
 ```
 
-## First production-shaped next step
+## Next production-shaped step
 
-Persist conversations and document metadata in PostgreSQL, then move vectors from the JSON file to `pgvector`. Keep the existing `Document → Chunk → retrieval → context → answer` interfaces while replacing the storage adapters. This preserves the concepts already learned while making it possible to add multiple users and background ingestion cleanly.
+Move conversations and document metadata from local SQLite into PostgreSQL, then move vectors from local Chroma to `pgvector`. Add migrations and tenant ownership as part of that change. Keep the existing `Document → Chunk → retrieval → context → answer` interfaces while replacing the storage adapters. This preserves the concepts already learned while preparing for multiple users and background ingestion.

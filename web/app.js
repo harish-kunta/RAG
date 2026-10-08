@@ -4,7 +4,45 @@ const messages = document.querySelector('#messages');
 const sendButton = document.querySelector('#send');
 const statusBox = document.querySelector('.status');
 const statusText = document.querySelector('#status-text');
-const history = [];
+const conversationList = document.querySelector('#conversation-list');
+const newChatButton = document.querySelector('#new-chat');
+let conversationId = null;
+
+function setUiBusy(busy) {
+  sendButton.disabled = busy;
+  newChatButton.disabled = busy;
+  for (const button of conversationList.querySelectorAll('button')) {
+    button.disabled = busy;
+  }
+}
+
+function showWelcome() {
+  const welcome = document.createElement('div');
+  welcome.className = 'welcome';
+  welcome.id = 'welcome';
+
+  const icon = document.createElement('div');
+  icon.className = 'welcome-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '✳';
+  const heading = document.createElement('h2');
+  heading.textContent = 'What would you like to know?';
+  const description = document.createElement('p');
+  description.textContent = 'Ask a question about the information you have indexed.';
+  welcome.append(icon, heading, description);
+
+  for (const suggestionText of [
+    'What does the sample warranty cover?',
+    'How long does domestic shipping take?',
+  ]) {
+    const suggestion = document.createElement('button');
+    suggestion.className = 'suggestion';
+    suggestion.type = 'button';
+    suggestion.textContent = suggestionText;
+    welcome.append(suggestion);
+  }
+  messages.replaceChildren(welcome);
+}
 
 function addMessage(role, content, sources = []) {
   document.querySelector('#welcome')?.remove();
@@ -65,6 +103,83 @@ function addMessage(role, content, sources = []) {
   return wrapper;
 }
 
+function setSelectedConversation(id) {
+  conversationId = id;
+  for (const item of conversationList.querySelectorAll('.conversation-button')) {
+    item.classList.toggle('selected', item.dataset.conversationId === id);
+  }
+}
+
+function renderConversationList(conversations) {
+  conversationList.replaceChildren();
+  if (!conversations.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-history';
+    empty.textContent = 'Your saved chats will appear here.';
+    conversationList.append(empty);
+    return;
+  }
+
+  for (const conversation of conversations) {
+    const row = document.createElement('div');
+    row.className = 'conversation-row';
+
+    const openButton = document.createElement('button');
+    openButton.className = 'conversation-button';
+    openButton.type = 'button';
+    openButton.dataset.conversationId = conversation.id;
+    openButton.disabled = sendButton.disabled;
+    openButton.classList.toggle('selected', conversation.id === conversationId);
+    openButton.textContent = conversation.title;
+    openButton.title = `${conversation.title} · ${conversation.message_count} messages`;
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'delete-conversation';
+    deleteButton.type = 'button';
+    deleteButton.dataset.deleteConversationId = conversation.id;
+    deleteButton.disabled = sendButton.disabled;
+    deleteButton.setAttribute('aria-label', `Delete ${conversation.title}`);
+    deleteButton.title = 'Delete conversation';
+    deleteButton.textContent = '×';
+
+    row.append(openButton, deleteButton);
+    conversationList.append(row);
+  }
+}
+
+async function loadConversationList() {
+  try {
+    const response = await fetch('/api/conversations');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not load saved chats.');
+    renderConversationList(data.conversations);
+  } catch (error) {
+    conversationList.replaceChildren();
+    const message = document.createElement('p');
+    message.className = 'empty-history error-text';
+    message.textContent = error.message;
+    conversationList.append(message);
+  }
+}
+
+async function openConversation(id) {
+  if (sendButton.disabled) return;
+  try {
+    const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Could not open this chat.');
+    setSelectedConversation(data.id);
+    messages.replaceChildren();
+    if (!data.messages.length) showWelcome();
+    for (const message of data.messages) {
+      addMessage(message.role, message.content, message.sources);
+    }
+  } catch (error) {
+    statusText.textContent = error.message;
+    statusBox.classList.add('error');
+  }
+}
+
 async function checkHealth() {
   try {
     const response = await fetch('/api/health');
@@ -88,30 +203,30 @@ form.addEventListener('submit', async (event) => {
   if (!question || sendButton.disabled) return;
 
   addMessage('user', question);
-  history.push({ role: 'user', content: question });
   input.value = '';
   input.style.height = 'auto';
-  sendButton.disabled = true;
+  setUiBusy(true);
   const waiting = addMessage('assistant', 'Searching your sources…');
 
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, history: history.slice(0, -1).slice(-12) }),
+      body: JSON.stringify({ question, conversation_id: conversationId }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'The chat request failed.');
     waiting.remove();
     addMessage('assistant', data.answer, data.sources);
-    history.push({ role: 'assistant', content: data.answer });
+    setSelectedConversation(data.conversation_id);
+    await loadConversationList();
   } catch (error) {
     waiting.querySelector('.bubble').textContent = error.message;
     statusText.textContent = 'Request failed';
     statusBox.classList.remove('ready');
     statusBox.classList.add('error');
   } finally {
-    sendButton.disabled = false;
+    setUiBusy(false);
     input.focus();
   }
 });
@@ -121,22 +236,47 @@ input.addEventListener('input', () => {
   input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
 });
 
-document.querySelectorAll('.suggestion').forEach((button) => {
-  button.addEventListener('click', () => {
-    input.value = button.textContent;
-    form.requestSubmit();
-  });
+messages.addEventListener('click', (event) => {
+  const suggestion = event.target.closest('.suggestion');
+  if (!suggestion) return;
+  input.value = suggestion.textContent;
+  form.requestSubmit();
 });
 
-document.querySelector('#new-chat').addEventListener('click', () => {
-  history.length = 0;
-  messages.replaceChildren();
-  const welcome = document.createElement('div');
-  welcome.className = 'welcome';
-  welcome.id = 'welcome';
-  welcome.innerHTML = '<div class="welcome-icon" aria-hidden="true">✳</div><h2>What would you like to know?</h2><p>Ask a question about the information you have indexed.</p>';
-  messages.append(welcome);
+conversationList.addEventListener('click', async (event) => {
+  if (sendButton.disabled) return;
+  const deleteButton = event.target.closest('[data-delete-conversation-id]');
+  if (deleteButton) {
+    const id = deleteButton.dataset.deleteConversationId;
+    if (!window.confirm('Delete this saved conversation?')) return;
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Could not delete this chat.');
+      if (conversationId === id) {
+        setSelectedConversation(null);
+        showWelcome();
+      }
+      await loadConversationList();
+    } catch (error) {
+      statusText.textContent = error.message;
+      statusBox.classList.add('error');
+    }
+    return;
+  }
+
+  const openButton = event.target.closest('[data-conversation-id]');
+  if (openButton) await openConversation(openButton.dataset.conversationId);
+});
+
+newChatButton.addEventListener('click', () => {
+  if (sendButton.disabled) return;
+  setSelectedConversation(null);
+  showWelcome();
   input.focus();
 });
 
+showWelcome();
 checkHealth();
+loadConversationList();

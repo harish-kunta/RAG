@@ -93,7 +93,7 @@ source adapters → LangChain Documents → RecursiveCharacterTextSplitter
   → keyword search + RRF → ChatPromptTemplate → ChatOpenAI → StrOutputParser
 ```
 
-It uses LangChain's `RecursiveCharacterTextSplitter`, `OpenAIEmbeddings`, Chroma vector store/retriever, and prompt → chat model → output parser chain. It keeps the project's lexical search and Reciprocal Rank Fusion (RRF), so the web app combines keyword results with the LangChain semantic results. The earlier `rag.py` CLI and its `--eval` report stay as the from-scratch baseline; that evaluation currently does not score the LangChain/Chroma path.
+It uses LangChain's `RecursiveCharacterTextSplitter`, `OpenAIEmbeddings`, Chroma vector store/retriever, and prompt → chat model → output parser chain. It keeps the project's lexical search and Reciprocal Rank Fusion (RRF), so the web app combines keyword results with the LangChain semantic results.
 
 Read the matching [text splitter](https://docs.langchain.com/oss/python/integrations/splitters/recursive_text_splitter), [OpenAI embeddings](https://docs.langchain.com/oss/python/integrations/embeddings/openai), [Chroma](https://docs.langchain.com/oss/python/integrations/vectorstores/chroma), and [ChatOpenAI](https://docs.langchain.com/oss/python/integrations/chat/openai) guides alongside `langchain_rag.py`.
 
@@ -107,7 +107,31 @@ uvicorn chat_app:app --reload
 
 Open <http://127.0.0.1:8000>. The first indexing run embeds the chunks and saves a persistent local Chroma database under `.langchain_chroma/`; query embeddings and answer generation use the OpenAI API. The index path is tied to a fingerprint of source contents and chunk settings. After sources change, run `python3 langchain_rag.py --index` again; use `--rebuild` to re-embed an unchanged source version.
 
-The key stays in the server environment; the browser never receives it. Chat history is held in browser memory and disappears on refresh. This is a local learning app, not safe to expose publicly: it has no login, per-user access controls, saved conversations, or production database. Chroma here is a local persistent store, not the eventual multi-user production deployment. See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the gaps and staged plan.
+The key stays in the server environment; the browser never receives it. Conversations now persist in `data/chat_history.sqlite3`: use the left-side list to reopen a chat, **New chat** to start another, and the × button to delete one. The database is created automatically when the server starts. This is still a local, single-user learning app: it has no login or per-user access controls, so anyone who can reach this instance can see its saved chats. Do not expose it publicly. Chroma is also local storage; see [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the remaining production work.
+
+This SQLite conversation store is a learning step toward a shared production database. It saves each user and assistant message together with the source cards shown for the answer. When a chat is reopened, the server loads its saved messages and uses the recent turns as context for follow-up questions. Delete a chat to remove its messages from this local database.
+
+### Compare the web retriever with the from-scratch version
+
+The labeled questions in `data/eval_questions.json` can score the retrieval used by the web chat beside the original hand-built retriever:
+
+```sh
+python3 rag.py --index
+python3 langchain_rag.py --index
+python3 langchain_rag.py --eval --top-k 3
+```
+
+Both indexes must match the current files, database, and synced notes. Re-run the two `--index` commands after changing sources. Evaluation embeds each question for both retrievers, but does not rebuild indexes or call the answer-generation model. It reports per-question results and averages for **Recall@3** (how many expected source documents appeared among the first three unique sources) and **MRR@3** (how high the first expected source appeared: rank 1 scores 1, rank 2 scores 0.5, rank 3 scores about 0.33, and missing from the first three scores 0).
+
+The two configurations currently use different chunking: the from-scratch index uses 500 characters with no overlap, while the LangChain index uses 500 characters with 80 characters of overlap. So this first comparison tells you how the two complete setups perform; it does not isolate LangChain itself as the cause of a score difference. The evaluation set is also small, so use it to learn and catch regressions, not as proof of production quality.
+
+To inspect answer quality too, each evaluation question has a human-written `reference_answer`. Run:
+
+```sh
+python3 langchain_rag.py --eval-answers
+```
+
+This runs retrieval and answer generation, then asks the configured chat model to score each answer from 0 (poor) to 2 (good) for correctness, groundedness in the retrieved passages, and citation quality. It makes one embedding request, one answer request, and one judge request per question. The judge is a helper, not ground truth: read the answer, reference, and judge note, and correct the labels if needed. This small demo does not yet measure how well the app abstains on questions its knowledge base cannot answer.
 
 ## Lesson 4: add Notion notes
 

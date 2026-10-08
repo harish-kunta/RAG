@@ -3,38 +3,42 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import rag
 import langchain_rag
+from conversation_store import ConversationStore
 
 
 ROOT = Path(__file__).parent
 WEB_DIR = ROOT / "web"
 logger = logging.getLogger(__name__)
+conversation_store = ConversationStore(ROOT / "data" / "chat_history.sqlite3")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    conversation_store.initialize()
+    yield
 
 app = FastAPI(
     title="RAG Chat",
     description="A local chat interface for the learning RAG pipeline.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
-class ChatMessage(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=2000)
-
-
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    history: list[ChatMessage] = Field(default_factory=list, max_length=12)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 @app.get("/", include_in_schema=False)
@@ -53,16 +57,46 @@ def health() -> dict[str, object]:
     return {"status": "ok", "vector_index_present": vector_index_present}
 
 
+@app.get("/api/conversations")
+def list_conversations() -> dict[str, object]:
+    return {"conversations": conversation_store.list_conversations()}
+
+
+@app.get("/api/conversations/{conversation_id}")
+def get_conversation(conversation_id: str) -> dict[str, object]:
+    conversation = conversation_store.get_conversation(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return conversation
+
+
+@app.delete("/api/conversations/{conversation_id}", status_code=204)
+def delete_conversation(conversation_id: str) -> Response:
+    if not conversation_store.delete_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return Response(status_code=204)
+
+
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> dict[str, object]:
     question = request.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="Enter a question first.")
 
+    conversation = None
+    if request.conversation_id:
+        conversation = conversation_store.get_conversation(
+            request.conversation_id,
+            message_limit=12,
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+    history = conversation["messages"] if conversation else []
+
     # A prior question helps with simple follow-ups such as “what about returns?”.
     # This is intentionally a small starter technique; production systems usually
     # add a measured query-rewriting step for conversational retrieval.
-    prior_user_questions = [message.content for message in request.history if message.role == "user"]
+    prior_user_questions = [message["content"] for message in history if message["role"] == "user"]
     retrieval_query = "\n".join([*prior_user_questions[-1:], question])
 
     try:
@@ -77,7 +111,7 @@ def chat(request: ChatRequest) -> dict[str, object]:
         answer = langchain_rag.generate_answer(
             question,
             context,
-            [(message.role, message.content) for message in request.history],
+            [(message["role"], message["content"]) for message in history],
         )
     except RuntimeError as exc:
         # Configuration and stale-index errors are actionable for a local learner.
@@ -103,4 +137,14 @@ def chat(request: ChatRequest) -> dict[str, object]:
             item["url"] = url
         sources.append(item)
 
-    return {"answer": answer, "sources": sources}
+    saved_conversation_id = conversation_store.append_turn(
+        question,
+        answer,
+        sources,
+        conversation_id=request.conversation_id,
+    )
+    return {
+        "answer": answer,
+        "sources": sources,
+        "conversation_id": saved_conversation_id,
+    }

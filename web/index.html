@@ -17,37 +17,38 @@
         <div class="status"><span class="status-dot"></span><span id="status-text">Checking knowledge base…</span></div>
       </header>
 
-      <section class="chat-shell" aria-label="Chat with your knowledge base">
-        <div class="chat-heading">
-          <div>
-            <p class="eyebrow">YOUR KNOWLEDGE BASE</p>
-            <h1>Ask your notes</h1>
-            <p class="subheading">Answers are grounded in retrieved passages from your files, SQLite data, and synced Notion notes.</p>
+      <div class="chat-workspace">
+        <aside class="history-panel" aria-label="Saved conversations">
+          <h2>Recent chats</h2>
+          <div id="conversation-list" class="conversation-list" aria-live="polite">
+            <p class="empty-history">Loading saved chats…</p>
           </div>
-          <button id="new-chat" class="quiet-button" type="button">New chat</button>
-        </div>
+        </aside>
 
-        <div id="messages" class="messages" aria-live="polite">
-          <div class="welcome" id="welcome">
-            <div class="welcome-icon" aria-hidden="true">✳</div>
-            <h2>What would you like to know?</h2>
-            <p>Ask a question about the information you have indexed.</p>
-            <button class="suggestion" type="button">What does the sample warranty cover?</button>
-            <button class="suggestion" type="button">How long does domestic shipping take?</button>
+        <section class="chat-shell" aria-label="Chat with your knowledge base">
+          <div class="chat-heading">
+            <div>
+              <p class="eyebrow">YOUR KNOWLEDGE BASE</p>
+              <h1>Ask your notes</h1>
+              <p class="subheading">Answers are grounded in retrieved passages from your files, SQLite data, and synced Notion notes.</p>
+            </div>
+            <button id="new-chat" class="quiet-button" type="button">New chat</button>
           </div>
-        </div>
 
-        <form id="chat-form" class="composer">
-          <label class="sr-only" for="question">Message</label>
-          <textarea id="question" name="question" rows="1" maxlength="2000" placeholder="Ask a question…" required></textarea>
-          <button id="send" class="send-button" type="submit" aria-label="Send message">
-            <span aria-hidden="true">↑</span>
-          </button>
-          <p class="composer-hint">RAG can make mistakes. Check the source passages.</p>
-        </form>
-      </section>
+          <div id="messages" class="messages" aria-live="polite"></div>
 
-      <footer>Local learning app · Your API key stays on the server</footer>
+          <form id="chat-form" class="composer">
+            <label class="sr-only" for="question">Message</label>
+            <textarea id="question" name="question" rows="1" maxlength="2000" placeholder="Ask a question…" required></textarea>
+            <button id="send" class="send-button" type="submit" aria-label="Send message">
+              <span aria-hidden="true">↑</span>
+            </button>
+            <p class="composer-hint">RAG can make mistakes. Check the source passages.</p>
+          </form>
+        </section>
+      </div>
+
+      <footer>Local learning app · Chats are saved in a local SQLite database · Your API key stays on the server</footer>
     </main>
     <script src="/static/app.js" defer></script>
   </body>

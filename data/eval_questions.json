@@ -2,41 +2,49 @@
   {
     "id": "return-window",
     "question": "Can I send it back if it has been sitting unused at home for a month?",
-    "relevant_sources": ["product_faq.md"]
+    "relevant_sources": ["product_faq.md"],
+    "reference_answer": "Unused products may be returned within 30 days of delivery."
   },
   {
     "id": "warranty-damage",
     "question": "If I crack the device by dropping it, will the warranty pay for a repair?",
-    "relevant_sources": ["product_faq.md"]
+    "relevant_sources": ["product_faq.md"],
+    "reference_answer": "No. The standard warranty does not cover accidental damage such as a drop."
   },
   {
     "id": "battery-charge",
     "question": "What percentage range should I keep the battery in during everyday use?",
-    "relevant_sources": ["product_faq.md"]
+    "relevant_sources": ["product_faq.md"],
+    "reference_answer": "Keep the battery between 20% and 80% charge for everyday use."
   },
   {
     "id": "support-schedule",
     "question": "Can I reach the support desk on Saturday?",
-    "relevant_sources": ["team_notes.txt"]
+    "relevant_sources": ["team_notes.txt"],
+    "reference_answer": "The note lists the support desk as open Monday through Friday; it does not explicitly state Saturday hours."
   },
   {
     "id": "domestic-shipping",
     "question": "How many business days does standard delivery take once the package is dispatched?",
-    "relevant_sources": ["sqlite:support_articles:shipping-101"]
+    "relevant_sources": ["sqlite:support_articles:shipping-101"],
+    "reference_answer": "Standard domestic delivery usually takes 3 to 5 business days after dispatch."
   },
   {
     "id": "change-shipped-order",
     "question": "Can support change the address after the parcel has left the warehouse?",
-    "relevant_sources": ["sqlite:support_articles:orders-204"]
+    "relevant_sources": ["sqlite:support_articles:orders-204"],
+    "reference_answer": "Support cannot change the address after dispatch. The customer can use the carrier tracking link to see whether delivery options are available."
   },
   {
     "id": "warranty-review-time",
     "question": "How long does it take to review a complete warranty claim?",
-    "relevant_sources": ["sqlite:support_articles:claims-305"]
+    "relevant_sources": ["sqlite:support_articles:claims-305"],
+    "reference_answer": "A complete warranty claim is usually reviewed within 5 business days."
   },
   {
     "id": "purchase-date-lookup",
     "question": "What should I ask the customer for to check if their purchase is still under warranty?",
-    "relevant_sources": ["product_faq.md", "team_notes.txt"]
+    "relevant_sources": ["product_faq.md", "team_notes.txt"],
+    "reference_answer": "Ask for the order number so support can look up the exact purchase date and check the two-year warranty period."
   }
 ]

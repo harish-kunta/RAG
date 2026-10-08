@@ -6,4 +6,5 @@ __pycache__/
 .rag_index.json
 .langchain_chroma/
 data/sample_support.sqlite3
+data/chat_history.sqlite3*
 data/notion_cache.json
