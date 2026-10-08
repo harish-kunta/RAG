@@ -337,6 +337,35 @@ def search_semantic(
     return ranked[:top_k]
 
 
+def search_hybrid(
+    question: str,
+    chunks: list[Chunk],
+    indexed_chunks: list[IndexedChunk],
+    top_k: int = 3,
+    rrf_constant: int = 60,
+) -> list[tuple[float, Chunk]]:
+    """Combine lexical and semantic rankings with Reciprocal Rank Fusion."""
+
+    candidate_k = max(top_k * 3, 10)
+    lexical_results = search_lexical(question, chunks, top_k=candidate_k)
+    semantic_results = search_semantic(question, indexed_chunks, top_k=candidate_k)
+
+    fused_scores: dict[tuple[str, int], float] = {}
+    fused_chunks: dict[tuple[str, int], Chunk] = {}
+    for ranked_results in (lexical_results, semantic_results):
+        for rank, (_, chunk) in enumerate(ranked_results, start=1):
+            key = (chunk.source, chunk.number)
+            fused_scores[key] = fused_scores.get(key, 0.0) + 1 / (rrf_constant + rank)
+            fused_chunks[key] = chunk
+
+    ranked = [
+        (score, fused_chunks[key])
+        for key, score in fused_scores.items()
+    ]
+    ranked.sort(key=lambda item: (-item[0], item[1].source, item[1].number))
+    return ranked[:top_k]
+
+
 def generate_answer(question: str, results: list[tuple[float, Chunk]]) -> str:
     """Ask the model to answer from retrieved chunks and cite their source IDs."""
 
@@ -389,6 +418,7 @@ def main() -> None:
     retrieval = parser.add_mutually_exclusive_group()
     retrieval.add_argument("--lexical", action="store_true", help="Use local word overlap instead of embeddings")
     retrieval.add_argument("--compare", action="store_true", help="Show both lexical and semantic search results")
+    retrieval.add_argument("--hybrid", action="store_true", help="Combine lexical and semantic rankings")
     parser.add_argument("--top-k", type=int, default=3, help="Number of matching chunks to show")
     parser.add_argument(
         "--context-only",
@@ -398,7 +428,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.index or args.init_db or args.sync_notion:
-        if args.question or args.lexical or args.compare:
+        if args.question or args.lexical or args.compare or args.hybrid:
             parser.error("--index, --init-db, and --sync-notion are standalone commands; omit the question and retrieval flags.")
         if sum((args.index, args.init_db, args.sync_notion)) > 1:
             parser.error("Choose one standalone action: --index, --init-db, or --sync-notion.")
@@ -433,13 +463,17 @@ def main() -> None:
             print_results("Lexical matches", results, show_text=args.context_only)
         else:
             indexed_chunks = load_vector_index(DATA_DIR)
-            semantic_results = search_semantic(args.question, indexed_chunks, top_k=top_k)
-            if args.compare:
-                lexical_results = search_lexical(args.question, chunks, top_k=top_k)
-                print_results("Lexical matches", lexical_results, show_text=args.context_only)
-                print()
-            print_results("Semantic matches", semantic_results, show_text=args.context_only)
-            results = semantic_results
+            if args.hybrid:
+                results = search_hybrid(args.question, chunks, indexed_chunks, top_k=top_k)
+                print_results("Hybrid matches (RRF score)", results, show_text=args.context_only)
+            else:
+                semantic_results = search_semantic(args.question, indexed_chunks, top_k=top_k)
+                if args.compare:
+                    lexical_results = search_lexical(args.question, chunks, top_k=top_k)
+                    print_results("Lexical matches", lexical_results, show_text=args.context_only)
+                    print()
+                print_results("Semantic matches", semantic_results, show_text=args.context_only)
+                results = semantic_results
     except RuntimeError as exc:
         parser.error(str(exc))
 

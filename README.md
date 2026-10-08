@@ -107,17 +107,31 @@ python3 rag.py "What did we decide about onboarding?" --context-only
 
 The sync saves readable page text and metadata in `data/notion_cache.json`; Git ignores this local cache. Sync again after Notion content changes, then rebuild the index. The starter connector extracts text blocks and nested blocks. It does not download files or interpret image contents, and it does not sync Notion databases as structured rows yet. The [Notion Search API](https://developers.notion.com/reference/post-search) finds pages available to the integration, and [block children](https://developers.notion.com/reference/get-block-children) provides page content. Both endpoints paginate, which the connector follows.
 
+## Lesson 5: combine keyword and meaning search
+
+Semantic search is good at paraphrases, while lexical search is useful for exact names, product codes, and phrases. Their raw scores have different scales, so adding those scores together would be misleading. Hybrid search combines their **rankings** with Reciprocal Rank Fusion (RRF): each result gets `1 / (60 + rank)` from each retriever, and results present in both lists get both contributions. This favors passages that rank well across both methods.
+
+First inspect the two rankings separately, then inspect their fused ranking:
+
+```sh
+python3 rag.py "Does the warranty cover normal wear and tear?" --compare --context-only
+python3 rag.py "Does the warranty cover normal wear and tear?" --hybrid --context-only
+```
+
+`--compare` displays lexical and semantic rankings side by side. `--hybrid` embeds the question once, like semantic search, and also runs local keyword search; it combines candidates from both lists, then uses the fused top passages for the answer. The displayed score is an RRF fusion score, not a probability or cosine similarity. Remove `--context-only` to generate an answer from those passages.
+
 ## The data path
 
 ```text
 Files + SQLite rows + Notion pages → Documents → Chunks → Embeddings → Vector index
-Question → Embedding → Similarity search → Retrieved context → Answer model
+Question → Keyword search + embedding search → Rank fusion → Retrieved context → Answer model
 ```
 
 - A **document** is a source item with text and metadata, such as its filename.
 - A **chunk** is a manageable passage from one document. Search returns chunks, while metadata lets us identify their source.
 - The lexical retriever looks for words shared by the question and each chunk. It is local and easy to inspect, but misses paraphrases.
 - The semantic retriever embeds each passage once, embeds a question when asked, then ranks passage vectors by cosine similarity. The JSON index is a tiny teaching stand-in for a vector database.
+- The hybrid retriever combines keyword and semantic result ranks with RRF. It helps when a question has exact terms and also uses wording different from the source.
 - The answer model receives only the retrieved passages. It is instructed to cite them and say when they do not contain an answer.
 - A changed source file makes the saved index stale; the program checks this and asks you to rebuild it.
 
