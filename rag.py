@@ -194,6 +194,39 @@ def chunk_documents(documents: list[Document], max_chars: int = 500) -> list[Chu
     return chunks
 
 
+def metadata_matches(metadata: dict[str, str], kind: str | None, team: str | None) -> bool:
+    """Check whether one source's metadata passes the requested filters."""
+
+    if kind and metadata.get("kind", "").casefold() != kind.casefold():
+        return False
+    if team and metadata.get("team", "").casefold() != team.strip().casefold():
+        return False
+    return True
+
+
+def filter_chunks(
+    chunks: list[Chunk],
+    kind: str | None = None,
+    team: str | None = None,
+) -> list[Chunk]:
+    """Keep only text chunks whose source metadata matches the query scope."""
+
+    return [chunk for chunk in chunks if metadata_matches(chunk.metadata, kind, team)]
+
+
+def filter_indexed_chunks(
+    indexed_chunks: list[IndexedChunk],
+    kind: str | None = None,
+    team: str | None = None,
+) -> list[IndexedChunk]:
+    """Apply the same metadata filters to embedded passages."""
+
+    return [
+        item for item in indexed_chunks
+        if metadata_matches(item.chunk.metadata, kind, team)
+    ]
+
+
 def words(text: str) -> list[str]:
     """Lowercase words for a basic lexical search."""
 
@@ -545,6 +578,12 @@ def main() -> None:
         default="all",
         help="Retriever to evaluate; 'all' compares all three methods",
     )
+    parser.add_argument(
+        "--kind",
+        choices=("file", "sqlite", "notion"),
+        help="Search only sources of this kind",
+    )
+    parser.add_argument("--team", help="Search only SQLite records assigned to this team")
     retrieval = parser.add_mutually_exclusive_group()
     retrieval.add_argument("--lexical", action="store_true", help="Use local word overlap instead of embeddings")
     retrieval.add_argument("--compare", action="store_true", help="Show both lexical and semantic search results")
@@ -562,7 +601,14 @@ def main() -> None:
 
     standalone_actions = (args.index, args.init_db, args.sync_notion, args.eval)
     if any(standalone_actions):
-        if args.question or args.lexical or args.compare or args.hybrid or args.context_only:
+        if (
+            args.question
+            or args.lexical
+            or args.compare
+            or args.hybrid
+            or args.context_only
+            or ((args.kind or args.team) and not args.eval)
+        ):
             parser.error("--index, --init-db, --sync-notion, and --eval are standalone actions; omit the question and retrieval flags.")
         if sum(standalone_actions) > 1:
             parser.error("Choose one standalone action: --index, --init-db, --sync-notion, or --eval.")
@@ -570,15 +616,27 @@ def main() -> None:
             try:
                 cases = load_evaluation_cases(DATA_DIR / "eval_questions.json")
                 documents = load_documents(DATA_DIR)
-                chunks = chunk_documents(documents)
+                chunks = filter_chunks(
+                    chunk_documents(documents),
+                    kind=args.kind,
+                    team=args.team,
+                )
+                if not chunks:
+                    print("No source chunks match the requested metadata filters.")
+                    return
                 methods = ["lexical", "semantic", "hybrid"] if args.eval_method == "all" else [args.eval_method]
                 indexed_chunks = (
-                    load_vector_index(DATA_DIR)
+                    filter_indexed_chunks(
+                        load_vector_index(DATA_DIR),
+                        kind=args.kind,
+                        team=args.team,
+                    )
                     if "semantic" in methods or "hybrid" in methods
                     else None
                 )
+                matching_documents = len({chunk.source for chunk in chunks})
                 print(
-                    f"Evaluating {len(cases)} questions against {len(documents)} documents "
+                    f"Evaluating {len(cases)} questions against {matching_documents} matching documents "
                     f"(source-level, top {max(args.top_k, 0)} unique sources)."
                 )
                 evaluate_retrievers(
@@ -613,15 +671,30 @@ def main() -> None:
         parser.error("Provide a question, or use --index to build the semantic search index.")
     top_k = max(args.top_k, 0)
     documents = load_documents(DATA_DIR)
-    chunks = chunk_documents(documents)
-    print(f"Loaded {len(documents)} documents and created {len(chunks)} chunks.\n")
+    all_chunks = chunk_documents(documents)
+    chunks = filter_chunks(all_chunks, kind=args.kind, team=args.team)
+    if args.kind or args.team:
+        active_filters = [f"kind={args.kind}" if args.kind else "", f"team={args.team}" if args.team else ""]
+        print(
+            f"Loaded {len(documents)} documents; {len(chunks)} of {len(all_chunks)} chunks "
+            f"match {', '.join(item for item in active_filters if item)}.\n"
+        )
+    else:
+        print(f"Loaded {len(documents)} documents and created {len(chunks)} chunks.\n")
+    if not chunks:
+        print("No source chunks match the requested metadata filters.")
+        return
 
     try:
         if args.lexical:
             results = search_lexical(args.question, chunks, top_k=top_k)
             print_results("Lexical matches", results, show_text=args.context_only)
         else:
-            indexed_chunks = load_vector_index(DATA_DIR)
+            indexed_chunks = filter_indexed_chunks(
+                load_vector_index(DATA_DIR),
+                kind=args.kind,
+                team=args.team,
+            )
             if args.hybrid:
                 results = search_hybrid(args.question, chunks, indexed_chunks, top_k=top_k)
                 print_results("Hybrid matches (RRF score)", results, show_text=args.context_only)

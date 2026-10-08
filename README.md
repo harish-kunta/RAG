@@ -147,14 +147,27 @@ python3 rag.py --eval --eval-method lexical --top-k 3
 
 Semantic and hybrid evaluation use the existing vector index and embed each question, but do not call the answer-generation model. Rebuild the index if sources changed. This lesson measures retrieval only; it does not judge whether the generated answer is correct or supported by the retrieved text.
 
+## Lesson 7: filter sources with metadata
+
+Each source has metadata alongside its text. Files have `kind=file`; Notion pages have `kind=notion`; SQLite records have `kind=sqlite` and fields such as `team=fulfillment` or `team=support`. A filter narrows the chunks considered **before** ranking, which is useful when you know the kind of source or team that should answer the question.
+
+Search just the fulfillment team’s SQLite records:
+
+```sh
+python3 rag.py "How long does domestic shipping take?" --kind sqlite --team fulfillment --lexical --context-only
+```
+
+You can filter only by source kind too, such as `--kind notion`, or only by team with `--team support`. Team matching ignores letter case. These filters work with lexical, semantic, hybrid, and evaluation commands. Search metadata filters help scope results, but they are not an access-control system: they do not decide who is allowed to read the underlying files, database, or Notion pages.
+
 ## The data path
 
 ```text
-Files + SQLite rows + Notion pages → Documents → Chunks → Embeddings → Vector index
-Question → Keyword search + embedding search → Rank fusion → Retrieved context → Answer model
+Files + SQLite rows + Notion pages → Documents + metadata → Chunks → Embeddings → Vector index
+Question → Metadata filters → Keyword search + embedding search → Rank fusion → Retrieved context → Answer model
 ```
 
 - A **document** is a source item with text and metadata, such as its filename.
+- **Metadata filters** narrow the searchable chunks by fields such as source kind or SQLite team before retrieval ranks them.
 - A **chunk** is a manageable passage from one document. Search returns chunks, while metadata lets us identify their source.
 - The lexical retriever looks for words shared by the question and each chunk. It is local and easy to inspect, but misses paraphrases.
 - The semantic retriever embeds each passage once, embeds a question when asked, then ranks passage vectors by cosine similarity. The JSON index is a tiny teaching stand-in for a vector database.
