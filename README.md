@@ -11,13 +11,16 @@ The pipeline reads text and Markdown files from `data/`, splits them into chunks
 In a terminal opened at this project folder, create a Python 3.10+ environment, install the project dependencies, and export your key into the current shell session:
 
 ```sh
-python3.10 -m venv .venv310
-source .venv310/bin/activate
-pip install -r requirements.txt
+python3.12 --version
+python3.12 -m venv .venv-langchain
+source .venv-langchain/bin/activate
+python --version
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 export OPENAI_API_KEY="your-key-here"
 ```
 
-The LangChain packages used by the web app require Python 3.10 or later. If `python3.10` is not installed, install Python 3.10+ before creating this environment. Keep the key in your terminal environment; do not paste it into this repository or into chat. The scripts read `OPENAI_API_KEY` automatically.
+The `python3.12 --version` and `python --version` commands should report Python 3.12. If `python3.12` is not installed, install Python 3.10+ from the [official macOS downloads](https://www.python.org/downloads/macos/) and replace `python3.12` above with the installed version's command. The separate `.venv-langchain` directory avoids reusing an older Python 3.9 environment. Keep the key in your terminal environment; do not paste it into this repository or into chat. The scripts read `OPENAI_API_KEY` automatically.
 
 ## Lesson 2: semantic search with embeddings
 
