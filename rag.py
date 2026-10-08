@@ -157,8 +157,18 @@ def split_long_paragraph(paragraph: str, max_chars: int) -> list[str]:
     return pieces
 
 
-def chunk_documents(documents: list[Document], max_chars: int = 500) -> list[Chunk]:
-    """Group paragraphs into chunks while keeping each chunk within max_chars."""
+def chunk_documents(
+    documents: list[Document],
+    max_chars: int = 500,
+    overlap: int = 0,
+) -> list[Chunk]:
+    """Group paragraphs into chunks, optionally repeating trailing context."""
+
+    if max_chars <= 0:
+        raise ValueError("Chunk size must be a positive number of characters.")
+    if overlap < 0 or (overlap and overlap + 1 >= max_chars):
+        raise ValueError("Chunk overlap must be zero or at least two characters smaller than chunk size.")
+    new_content_limit = max_chars if overlap == 0 else max_chars - overlap - 1
 
     chunks: list[Chunk] = []
     for document in documents:
@@ -166,15 +176,15 @@ def chunk_documents(documents: list[Document], max_chars: int = 500) -> list[Chu
         passages: list[str] = []
         current = ""
         for paragraph in paragraphs:
-            if len(paragraph) > max_chars:
+            if len(paragraph) > new_content_limit:
                 if current:
                     passages.append(current)
                     current = ""
-                passages.extend(split_long_paragraph(paragraph, max_chars))
+                passages.extend(split_long_paragraph(paragraph, new_content_limit))
                 continue
 
             candidate = f"{current}\n\n{paragraph}".strip()
-            if len(candidate) > max_chars and current:
+            if len(candidate) > new_content_limit and current:
                 passages.append(current)
                 current = paragraph
             else:
@@ -183,6 +193,15 @@ def chunk_documents(documents: list[Document], max_chars: int = 500) -> list[Chu
             passages.append(current)
 
         for number, passage in enumerate(passages, start=1):
+            if overlap and number > 1:
+                previous_tail = passages[number - 2][-overlap:]
+                # Start at a word boundary so we don't prepend a partial word.
+                boundary = previous_tail.find(" ")
+                if boundary >= 0:
+                    previous_tail = previous_tail[boundary + 1:]
+                else:
+                    previous_tail = ""
+                passage = f"{previous_tail}\n{passage}" if previous_tail else passage
             chunks.append(
                 Chunk(
                     source=document.source,
@@ -276,11 +295,11 @@ def openai_client():
     return OpenAI()
 
 
-def build_vector_index(data_dir: Path) -> int:
+def build_vector_index(data_dir: Path, overlap: int = 0) -> int:
     """Embed every chunk once and save the vectors in a small local JSON index."""
 
     documents = load_documents(data_dir)
-    chunks = chunk_documents(documents)
+    chunks = chunk_documents(documents, overlap=overlap)
     if not chunks:
         raise RuntimeError(f"No .md or .txt files found under {data_dir}.")
 
@@ -293,6 +312,7 @@ def build_vector_index(data_dir: Path) -> int:
     vectors = {item.index: item.embedding for item in response.data}
     payload = {
         "embedding_model": EMBEDDING_MODEL,
+        "chunking": {"max_chars": 500, "overlap": overlap},
         "source_fingerprint": source_fingerprint(documents),
         "chunks": [
             {
@@ -309,7 +329,7 @@ def build_vector_index(data_dir: Path) -> int:
     return len(chunks)
 
 
-def load_vector_index(data_dir: Path) -> list[IndexedChunk]:
+def load_vector_index(data_dir: Path, overlap: int = 0) -> list[IndexedChunk]:
     """Load saved vectors and reject an index built from stale source files."""
 
     if not INDEX_PATH.exists():
@@ -318,6 +338,13 @@ def load_vector_index(data_dir: Path) -> list[IndexedChunk]:
     payload = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
     if payload.get("embedding_model") != EMBEDDING_MODEL:
         raise RuntimeError("The embedding model changed. Rebuild the index with: python3 rag.py --index")
+    requested_chunking = {"max_chars": 500, "overlap": overlap}
+    saved_chunking = payload.get("chunking", {"max_chars": 500, "overlap": 0})
+    if saved_chunking != requested_chunking:
+        raise RuntimeError(
+            "The vector index uses different chunking settings. Rebuild it with the same "
+            "--chunk-overlap value used for this search."
+        )
 
     documents = load_documents(data_dir)
     if payload.get("source_fingerprint") != source_fingerprint(documents):
@@ -590,12 +617,20 @@ def main() -> None:
     retrieval.add_argument("--hybrid", action="store_true", help="Combine lexical and semantic rankings")
     parser.add_argument("--top-k", type=int, default=3, help="Number of matches to show or source documents to score")
     parser.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=0,
+        help="Characters repeated from the previous chunk (0 to 250; default: 0)",
+    )
+    parser.add_argument(
         "--context-only",
         action="store_true",
         help="Show retrieved passages without asking the answer model",
     )
     args = parser.parse_args()
 
+    if args.chunk_overlap < 0 or args.chunk_overlap > 250:
+        parser.error("--chunk-overlap must be between 0 and 250 for the current 500-character chunks.")
     if args.eval_method != "all" and not args.eval:
         parser.error("--eval-method can only be used with --eval.")
 
@@ -617,7 +652,7 @@ def main() -> None:
                 cases = load_evaluation_cases(DATA_DIR / "eval_questions.json")
                 documents = load_documents(DATA_DIR)
                 chunks = filter_chunks(
-                    chunk_documents(documents),
+                    chunk_documents(documents, overlap=args.chunk_overlap),
                     kind=args.kind,
                     team=args.team,
                 )
@@ -627,7 +662,7 @@ def main() -> None:
                 methods = ["lexical", "semantic", "hybrid"] if args.eval_method == "all" else [args.eval_method]
                 indexed_chunks = (
                     filter_indexed_chunks(
-                        load_vector_index(DATA_DIR),
+                        load_vector_index(DATA_DIR, overlap=args.chunk_overlap),
                         kind=args.kind,
                         team=args.team,
                     )
@@ -661,7 +696,7 @@ def main() -> None:
             print(f"Initialized the sample SQLite database at {database_path.relative_to(Path(__file__).parent)}.")
             return
         try:
-            count = build_vector_index(DATA_DIR)
+            count = build_vector_index(DATA_DIR, overlap=args.chunk_overlap)
         except RuntimeError as exc:
             parser.error(str(exc))
         print(f"Embedded {count} chunks with {EMBEDDING_MODEL} and saved {INDEX_PATH.name}.")
@@ -671,7 +706,7 @@ def main() -> None:
         parser.error("Provide a question, or use --index to build the semantic search index.")
     top_k = max(args.top_k, 0)
     documents = load_documents(DATA_DIR)
-    all_chunks = chunk_documents(documents)
+    all_chunks = chunk_documents(documents, overlap=args.chunk_overlap)
     chunks = filter_chunks(all_chunks, kind=args.kind, team=args.team)
     if args.kind or args.team:
         active_filters = [f"kind={args.kind}" if args.kind else "", f"team={args.team}" if args.team else ""]
@@ -691,7 +726,7 @@ def main() -> None:
             print_results("Lexical matches", results, show_text=args.context_only)
         else:
             indexed_chunks = filter_indexed_chunks(
-                load_vector_index(DATA_DIR),
+                load_vector_index(DATA_DIR, overlap=args.chunk_overlap),
                 kind=args.kind,
                 team=args.team,
             )

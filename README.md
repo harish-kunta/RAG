@@ -159,6 +159,27 @@ python3 rag.py "How long does domestic shipping take?" --kind sqlite --team fulf
 
 You can filter only by source kind too, such as `--kind notion`, or only by team with `--team support`. Team matching ignores letter case. These filters work with lexical, semantic, hybrid, and evaluation commands. Search metadata filters help scope results, but they are not an access-control system: they do not decide who is allowed to read the underlying files, database, or Notion pages.
 
+## Lesson 8: keep context across chunk boundaries
+
+The current chunker groups text into passages of about 500 characters. With no overlap, a useful sentence can land at the end of one passage while its explanation starts in the next. Overlap repeats a small amount of the previous passage at the start of the next one, so either chunk may carry enough context to make sense on its own.
+
+Try an 80-character overlap with the local lexical evaluation:
+
+```sh
+python3 rag.py --eval --eval-method lexical --chunk-overlap 80 --top-k 3
+```
+
+Compare its Recall@3 and MRR@3 with the zero-overlap baseline from Lesson 6. A higher score on these sample questions suggests the overlap helped this dataset; it does not guarantee improvement for every knowledge base. Overlap also repeats text, which can increase index size and embed cost.
+
+For semantic or hybrid search, rebuild the vector index with the same overlap setting, then pass that setting when searching or evaluating:
+
+```sh
+python3 rag.py --index --chunk-overlap 80
+python3 rag.py --eval --chunk-overlap 80 --top-k 3
+```
+
+The index records its chunking setting. If you search with a different overlap, the program asks you to rebuild so each question is compared against vectors for the same chunks. Overlap is measured in characters here; production systems usually tune chunk size and overlap against their own data and evaluation questions.
+
 ## The data path
 
 ```text
@@ -173,6 +194,7 @@ Question → Metadata filters → Keyword search + embedding search → Rank fus
 - The semantic retriever embeds each passage once, embeds a question when asked, then ranks passage vectors by cosine similarity. The JSON index is a tiny teaching stand-in for a vector database.
 - The hybrid retriever combines keyword and semantic result ranks with RRF. It helps when a question has exact terms and also uses wording different from the source.
 - The evaluation set records which source documents should answer sample questions. Recall@k and MRR@k help compare retrieval methods before assessing answer quality.
+- Chunk overlap repeats a little preceding text at each boundary so relevant context is less likely to be split away from the passage that needs it.
 - The answer model receives only the retrieved passages. It is instructed to cite them and say when they do not contain an answer.
 - A changed source file makes the saved index stale; the program checks this and asks you to rebuild it.
 
