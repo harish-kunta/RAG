@@ -1,0 +1,3 @@
+Team note: If a warranty answer depends on a customer’s purchase date, ask for the order number so support can look up the exact purchase date.
+
+Team note: The support desk is open Monday through Friday. This sample note is here to represent informal external notes, which may need their own owner, date, and permission metadata in a real system.
