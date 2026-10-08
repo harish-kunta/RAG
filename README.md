@@ -120,6 +120,33 @@ python3 rag.py "Does the warranty cover normal wear and tear?" --hybrid --contex
 
 `--compare` displays lexical and semantic rankings side by side. `--hybrid` embeds the question once, like semantic search, and also runs local keyword search; it combines candidates from both lists, then uses the fused top passages for the answer. The displayed score is an RRF fusion score, not a probability or cosine similarity. Remove `--context-only` to generate an answer from those passages.
 
+## Lesson 6: measure retrieval quality
+
+Before changing a retriever, check whether it finds the sources you expect. `data/eval_questions.json` is a small evaluation set: each question has one or more relevant source IDs. These labels are examples you can edit as the knowledge base changes.
+
+Create the sample SQLite database if you have not already, then build an index containing your current sources:
+
+```sh
+python3 rag.py --init-db
+python3 rag.py --index
+```
+
+Compare all three retrieval methods:
+
+```sh
+python3 rag.py --eval --top-k 3
+```
+
+The report includes per-question **Recall@3** and **RR@3**, then their averages (**MRR@3** for reciprocal rank). Recall measures how many expected source documents appeared in the first three unique sources. Reciprocal rank gives more credit when the first relevant source appears near the top. Evaluation labels are at the document/source level, so multiple chunks from one document count as one source.
+
+To evaluate lexical search locally without an OpenAI key or vector index:
+
+```sh
+python3 rag.py --eval --eval-method lexical --top-k 3
+```
+
+Semantic and hybrid evaluation use the existing vector index and embed each question, but do not call the answer-generation model. Rebuild the index if sources changed. This lesson measures retrieval only; it does not judge whether the generated answer is correct or supported by the retrieved text.
+
 ## The data path
 
 ```text
@@ -132,6 +159,7 @@ Question → Keyword search + embedding search → Rank fusion → Retrieved con
 - The lexical retriever looks for words shared by the question and each chunk. It is local and easy to inspect, but misses paraphrases.
 - The semantic retriever embeds each passage once, embeds a question when asked, then ranks passage vectors by cosine similarity. The JSON index is a tiny teaching stand-in for a vector database.
 - The hybrid retriever combines keyword and semantic result ranks with RRF. It helps when a question has exact terms and also uses wording different from the source.
+- The evaluation set records which source documents should answer sample questions. Recall@k and MRR@k help compare retrieval methods before assessing answer quality.
 - The answer model receives only the retrieved passages. It is instructed to cite them and say when they do not contain an answer.
 - A changed source file makes the saved index stale; the program checks this and asks you to rebuild it.
 

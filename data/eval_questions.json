@@ -1,0 +1,42 @@
+[
+  {
+    "id": "return-window",
+    "question": "Can I send it back if it has been sitting unused at home for a month?",
+    "relevant_sources": ["product_faq.md"]
+  },
+  {
+    "id": "warranty-damage",
+    "question": "If I crack the device by dropping it, will the warranty pay for a repair?",
+    "relevant_sources": ["product_faq.md"]
+  },
+  {
+    "id": "battery-charge",
+    "question": "What percentage range should I keep the battery in during everyday use?",
+    "relevant_sources": ["product_faq.md"]
+  },
+  {
+    "id": "support-schedule",
+    "question": "Can I reach the support desk on Saturday?",
+    "relevant_sources": ["team_notes.txt"]
+  },
+  {
+    "id": "domestic-shipping",
+    "question": "How many business days does standard delivery take once the package is dispatched?",
+    "relevant_sources": ["sqlite:support_articles:shipping-101"]
+  },
+  {
+    "id": "change-shipped-order",
+    "question": "Can support change the address after the parcel has left the warehouse?",
+    "relevant_sources": ["sqlite:support_articles:orders-204"]
+  },
+  {
+    "id": "warranty-review-time",
+    "question": "How long does it take to review a complete warranty claim?",
+    "relevant_sources": ["sqlite:support_articles:claims-305"]
+  },
+  {
+    "id": "purchase-date-lookup",
+    "question": "What should I ask the customer for to check if their purchase is still under warranty?",
+    "relevant_sources": ["product_faq.md", "team_notes.txt"]
+  }
+]

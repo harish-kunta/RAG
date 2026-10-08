@@ -349,6 +349,16 @@ def search_hybrid(
     candidate_k = max(top_k * 3, 10)
     lexical_results = search_lexical(question, chunks, top_k=candidate_k)
     semantic_results = search_semantic(question, indexed_chunks, top_k=candidate_k)
+    return fuse_ranked_results(lexical_results, semantic_results, top_k=top_k, rrf_constant=rrf_constant)
+
+
+def fuse_ranked_results(
+    lexical_results: list[tuple[float, Chunk]],
+    semantic_results: list[tuple[float, Chunk]],
+    top_k: int = 3,
+    rrf_constant: int = 60,
+) -> list[tuple[float, Chunk]]:
+    """Fuse already-computed rankings, useful when evaluating several retrievers."""
 
     fused_scores: dict[tuple[str, int], float] = {}
     fused_chunks: dict[tuple[str, int], Chunk] = {}
@@ -364,6 +374,119 @@ def search_hybrid(
     ]
     ranked.sort(key=lambda item: (-item[0], item[1].source, item[1].number))
     return ranked[:top_k]
+
+
+def load_evaluation_cases(path: Path) -> list[dict[str, object]]:
+    """Load questions with expected relevant source IDs from a JSON file."""
+
+    try:
+        cases = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RuntimeError(f"Could not read evaluation questions at {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Evaluation file is not valid JSON: {path}") from exc
+
+    if not isinstance(cases, list) or not cases:
+        raise RuntimeError("The evaluation file must contain a non-empty JSON list.")
+
+    for number, case in enumerate(cases, start=1):
+        if not isinstance(case, dict):
+            raise RuntimeError(f"Evaluation item {number} must be a JSON object.")
+        if not isinstance(case.get("id"), str) or not case["id"].strip():
+            raise RuntimeError(f"Evaluation item {number} needs a non-empty string 'id'.")
+        if not isinstance(case.get("question"), str) or not case["question"].strip():
+            raise RuntimeError(f"Evaluation item {number} needs a non-empty string 'question'.")
+        relevant = case.get("relevant_sources")
+        if (
+            not isinstance(relevant, list)
+            or not relevant
+            or any(not isinstance(source, str) or not source for source in relevant)
+        ):
+            raise RuntimeError(
+                f"Evaluation item {case['id']} needs a non-empty 'relevant_sources' string list."
+            )
+    return cases
+
+
+def unique_source_order(results: list[tuple[float, Chunk]]) -> list[str]:
+    """Collapse chunk rankings into document rankings, keeping each source's best rank."""
+
+    sources = []
+    seen = set()
+    for _, chunk in results:
+        if chunk.source not in seen:
+            seen.add(chunk.source)
+            sources.append(chunk.source)
+    return sources
+
+
+def evaluate_retrievers(
+    cases: list[dict[str, object]],
+    chunks: list[Chunk],
+    indexed_chunks: list[IndexedChunk] | None,
+    methods: list[str],
+    top_k: int,
+) -> None:
+    """Report source-level Recall@k and reciprocal rank for selected retrievers."""
+
+    available_sources = {chunk.source for chunk in chunks}
+    question_scores: dict[str, list[tuple[float, float]]] = {method: [] for method in methods}
+
+    for case in cases:
+        case_id = str(case["id"])
+        question = str(case["question"])
+        relevant_sources = set(case["relevant_sources"])
+        missing_sources = sorted(relevant_sources - available_sources)
+        if missing_sources:
+            print(f"Warning: {case_id} expects sources not loaded: {', '.join(missing_sources)}")
+
+        candidate_count = max(len(chunks), len(indexed_chunks or []))
+        lexical_results = None
+        semantic_results = None
+        if "lexical" in methods or "hybrid" in methods:
+            lexical_results = search_lexical(question, chunks, top_k=candidate_count)
+        if "semantic" in methods or "hybrid" in methods:
+            if indexed_chunks is None:
+                raise RuntimeError("Semantic evaluation needs a vector index. Build one with: python3 rag.py --index")
+            semantic_results = search_semantic(question, indexed_chunks, top_k=candidate_count)
+
+        results_by_method: dict[str, list[tuple[float, Chunk]]] = {}
+        if "lexical" in methods and lexical_results is not None:
+            results_by_method["lexical"] = lexical_results
+        if "semantic" in methods and semantic_results is not None:
+            results_by_method["semantic"] = semantic_results
+        if "hybrid" in methods and lexical_results is not None and semantic_results is not None:
+            results_by_method["hybrid"] = fuse_ranked_results(
+                lexical_results,
+                semantic_results,
+                top_k=candidate_count,
+            )
+
+        print(f"\n{case_id}: {question}")
+        for method in methods:
+            ranked_sources = unique_source_order(results_by_method[method])[:top_k]
+            found_sources = set(ranked_sources) & relevant_sources
+            recall = len(found_sources) / len(relevant_sources)
+            reciprocal_rank = next(
+                (1 / rank for rank, source in enumerate(ranked_sources, start=1) if source in relevant_sources),
+                0.0,
+            )
+            question_scores[method].append((recall, reciprocal_rank))
+            retrieved = ", ".join(ranked_sources) if ranked_sources else "(no results)"
+            print(
+                f"  {method:8} Recall@{top_k}={recall:.2f}  "
+                f"RR@{top_k}={reciprocal_rank:.2f}  sources: {retrieved}"
+            )
+
+    print(f"\nMean across {len(cases)} questions:")
+    for method in methods:
+        scores = question_scores[method]
+        mean_recall = sum(recall for recall, _ in scores) / len(scores)
+        mean_reciprocal_rank = sum(rr for _, rr in scores) / len(scores)
+        print(
+            f"  {method:8} Recall@{top_k}={mean_recall:.2f}  "
+            f"MRR@{top_k}={mean_reciprocal_rank:.2f}"
+        )
 
 
 def generate_answer(question: str, results: list[tuple[float, Chunk]]) -> str:
@@ -415,11 +538,18 @@ def main() -> None:
     parser.add_argument("--index", action="store_true", help="Embed the current source files and save an index")
     parser.add_argument("--init-db", action="store_true", help="Create the sample SQLite database")
     parser.add_argument("--sync-notion", action="store_true", help="Fetch pages shared with the Notion integration")
+    parser.add_argument("--eval", action="store_true", help="Score retrieval methods against the sample questions")
+    parser.add_argument(
+        "--eval-method",
+        choices=("all", "lexical", "semantic", "hybrid"),
+        default="all",
+        help="Retriever to evaluate; 'all' compares all three methods",
+    )
     retrieval = parser.add_mutually_exclusive_group()
     retrieval.add_argument("--lexical", action="store_true", help="Use local word overlap instead of embeddings")
     retrieval.add_argument("--compare", action="store_true", help="Show both lexical and semantic search results")
     retrieval.add_argument("--hybrid", action="store_true", help="Combine lexical and semantic rankings")
-    parser.add_argument("--top-k", type=int, default=3, help="Number of matching chunks to show")
+    parser.add_argument("--top-k", type=int, default=3, help="Number of matches to show or source documents to score")
     parser.add_argument(
         "--context-only",
         action="store_true",
@@ -427,11 +557,40 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.index or args.init_db or args.sync_notion:
-        if args.question or args.lexical or args.compare or args.hybrid:
-            parser.error("--index, --init-db, and --sync-notion are standalone commands; omit the question and retrieval flags.")
-        if sum((args.index, args.init_db, args.sync_notion)) > 1:
-            parser.error("Choose one standalone action: --index, --init-db, or --sync-notion.")
+    if args.eval_method != "all" and not args.eval:
+        parser.error("--eval-method can only be used with --eval.")
+
+    standalone_actions = (args.index, args.init_db, args.sync_notion, args.eval)
+    if any(standalone_actions):
+        if args.question or args.lexical or args.compare or args.hybrid or args.context_only:
+            parser.error("--index, --init-db, --sync-notion, and --eval are standalone actions; omit the question and retrieval flags.")
+        if sum(standalone_actions) > 1:
+            parser.error("Choose one standalone action: --index, --init-db, --sync-notion, or --eval.")
+        if args.eval:
+            try:
+                cases = load_evaluation_cases(DATA_DIR / "eval_questions.json")
+                documents = load_documents(DATA_DIR)
+                chunks = chunk_documents(documents)
+                methods = ["lexical", "semantic", "hybrid"] if args.eval_method == "all" else [args.eval_method]
+                indexed_chunks = (
+                    load_vector_index(DATA_DIR)
+                    if "semantic" in methods or "hybrid" in methods
+                    else None
+                )
+                print(
+                    f"Evaluating {len(cases)} questions against {len(documents)} documents "
+                    f"(source-level, top {max(args.top_k, 0)} unique sources)."
+                )
+                evaluate_retrievers(
+                    cases,
+                    chunks,
+                    indexed_chunks,
+                    methods,
+                    top_k=max(args.top_k, 0),
+                )
+            except RuntimeError as exc:
+                parser.error(str(exc))
+            return
         if args.sync_notion:
             try:
                 count = sync_notion_notes(DATA_DIR / NOTION_CACHE_NAME)
