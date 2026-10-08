@@ -8,7 +8,8 @@ import json
 import math
 import os
 import re
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -17,6 +18,8 @@ SUPPORTED_SUFFIXES = {".md", ".txt"}
 OPENAI_MODEL = "gpt-6-luna"
 EMBEDDING_MODEL = "text-embedding-3-small"
 INDEX_PATH = Path(__file__).parent / ".rag_index.json"
+DATABASE_NAME = "sample_support.sqlite3"
+DATABASE_SEED = "database_seed.sql"
 # These words occur in many questions and passages, so they rarely help choose a source.
 STOP_WORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does", "for",
@@ -31,6 +34,7 @@ class Document:
 
     source: str
     text: str
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -40,6 +44,7 @@ class Chunk:
     source: str
     number: int
     text: str
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,15 +56,58 @@ class IndexedChunk:
 
 
 def load_documents(data_dir: Path) -> list[Document]:
-    """Read supported text files. A database connector can return Documents too."""
+    """Read files and SQLite rows, converting each source item to a Document."""
 
     documents = []
     for path in sorted(data_dir.rglob("*")):
         if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES:
             documents.append(
-                Document(source=str(path.relative_to(data_dir)), text=path.read_text(encoding="utf-8"))
+                Document(
+                    source=str(path.relative_to(data_dir)),
+                    text=path.read_text(encoding="utf-8"),
+                    metadata={"kind": "file"},
+                )
             )
+    database_path = data_dir / DATABASE_NAME
+    if database_path.exists():
+        documents.extend(load_database_documents(database_path))
     return documents
+
+
+def load_database_documents(database_path: Path) -> list[Document]:
+    """Adapt support article rows into the same Document shape used for files."""
+
+    database_uri = f"{database_path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(database_uri, uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT id, title, body, team, updated_at FROM support_articles ORDER BY id"
+        ).fetchall()
+
+    return [
+        Document(
+            source=f"sqlite:support_articles:{row['id']}",
+            text=f"{row['title']}\n\n{row['body']}",
+            metadata={
+                "kind": "sqlite",
+                "table": "support_articles",
+                "record_id": str(row["id"]),
+                "team": row["team"],
+                "updated_at": row["updated_at"],
+            },
+        )
+        for row in rows
+    ]
+
+
+def initialize_demo_database(data_dir: Path) -> Path:
+    """Create the demo SQLite database from its readable SQL seed file."""
+
+    database_path = data_dir / DATABASE_NAME
+    seed_path = data_dir / DATABASE_SEED
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(seed_path.read_text(encoding="utf-8"))
+    return database_path
 
 
 def split_long_paragraph(paragraph: str, max_chars: int) -> list[str]:
@@ -122,7 +170,14 @@ def chunk_documents(documents: list[Document], max_chars: int = 500) -> list[Chu
             passages.append(current)
 
         for number, passage in enumerate(passages, start=1):
-            chunks.append(Chunk(source=document.source, number=number, text=passage))
+            chunks.append(
+                Chunk(
+                    source=document.source,
+                    number=number,
+                    text=passage,
+                    metadata=document.metadata.copy(),
+                )
+            )
     return chunks
 
 
@@ -156,7 +211,7 @@ def source_fingerprint(documents: list[Document]) -> str:
     """Detect when source files change after their chunks were embedded."""
 
     source_text = json.dumps(
-        [(document.source, document.text) for document in documents],
+        [(document.source, document.text, document.metadata) for document in documents],
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -198,6 +253,7 @@ def build_vector_index(data_dir: Path) -> int:
                 "source": chunk.source,
                 "number": chunk.number,
                 "text": chunk.text,
+                "metadata": chunk.metadata,
                 "vector": vectors[index],
             }
             for index, chunk in enumerate(chunks)
@@ -223,7 +279,12 @@ def load_vector_index(data_dir: Path) -> list[IndexedChunk]:
 
     return [
         IndexedChunk(
-            chunk=Chunk(source=item["source"], number=item["number"], text=item["text"]),
+            chunk=Chunk(
+                source=item["source"],
+                number=item["number"],
+                text=item["text"],
+                metadata=item.get("metadata", {}),
+            ),
             vector=item["vector"],
         )
         for item in payload["chunks"]
@@ -298,6 +359,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Search the sample RAG knowledge base.")
     parser.add_argument("question", nargs="?", help="A question or search phrase")
     parser.add_argument("--index", action="store_true", help="Embed the current source files and save an index")
+    parser.add_argument("--init-db", action="store_true", help="Create the sample SQLite database")
     retrieval = parser.add_mutually_exclusive_group()
     retrieval.add_argument("--lexical", action="store_true", help="Use local word overlap instead of embeddings")
     retrieval.add_argument("--compare", action="store_true", help="Show both lexical and semantic search results")
@@ -309,9 +371,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.index:
+    if args.index or args.init_db:
         if args.question or args.lexical or args.compare:
-            parser.error("--index is a standalone command; omit the question and retrieval flags.")
+            parser.error("--index and --init-db are standalone commands; omit the question and retrieval flags.")
+        if args.index and args.init_db:
+            parser.error("Choose one standalone action: --index or --init-db.")
+        if args.init_db:
+            database_path = initialize_demo_database(DATA_DIR)
+            print(f"Initialized the sample SQLite database at {database_path.relative_to(Path(__file__).parent)}.")
+            return
         try:
             count = build_vector_index(DATA_DIR)
         except RuntimeError as exc:

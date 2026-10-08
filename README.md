@@ -51,6 +51,21 @@ python3 rag.py "Can I send this back after a month?" --lexical --context-only
 
 The official OpenAI docs list `text-embedding-3-small` at $0.02 per million input tokens. Source chunks are embedded once per index build; each semantic question needs one query embedding. [Embedding model details](https://developers.openai.com/api/docs/models/text-embedding-3-small) · [Embedding guide](https://developers.openai.com/api/docs/guides/embeddings)
 
+## Lesson 3: add database rows
+
+The text files and team notes are one source. Now we add a small SQLite database as another source. The SQL schema and sample rows are readable in `data/database_seed.sql`.
+
+Create the local demo database, then rebuild the vector index so it contains both files and database rows:
+
+```sh
+python3 rag.py --init-db
+python3 rag.py --index
+```
+
+When reading the table, the SQLite connector turns each row into a `Document`: the title and body become searchable text, and fields such as record ID, team, and update date become metadata. A source label like `sqlite:support_articles:shipping-101` makes citations trace back to a specific record. The generated `.sqlite3` file is local and ignored by Git.
+
+After changing database content, rebuild the vector index. The index fingerprint includes source text and metadata, so search detects changes and asks for a rebuild if the index is stale.
+
 ## Ask a question
 
 ```sh
@@ -83,4 +98,4 @@ Question → Embedding → Similarity search → Retrieved context → Answer mo
 
 Run both the lexical and semantic commands for the same paraphrased question. Compare the retrieved source chunks before looking at the generated answer. This helps distinguish a retrieval issue from an answer-generation issue.
 
-Next we will improve chunking and search, then connect more source types. Database rows and external notes can use the same document shape as files: each connector reads source-specific data and converts it into documents before indexing.
+The sample notes remain a text file source. A real external notes service can use its own connector to fetch records and convert them to the same `Document` shape before indexing.
